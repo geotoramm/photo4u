@@ -473,7 +473,7 @@
                 </div>
             </div>
 
-            <!-- 촬영 직전: 10초 카운트다운 및 필터 선택 패널 -->
+            <!-- 매 컷마다 반복해서 표시될: 10초 카운트다운 및 필터 선택 패널 -->
             <div id="pre-shot-panel" class="pre-shot-panel" style="display: none;">
                 <div class="filter-group-camera">
                     <button class="filter-btn active" onclick="app.setFilter('none', this)">원본</button>
@@ -514,11 +514,12 @@
         state: {
             frameColor: '#f7e600',
             stream: null,
-            photos: [],
+            photos: [], // 매 사진마다 객체 형태로 저장 (url, filter)
             finalCanvasDataUrl: null,
             isUploading: false,
             orientation: 'landscape',
             currentFilter: 'none',
+            currentShotIndex: 1, // 현재 몇 번째 사진인지 추적
             countdownValue: 10,
             timerInterval: null
         },
@@ -591,7 +592,9 @@
                         }
                     });
 
-                    // 10초 대기열 및 필터 선택 시작
+                    // 촬영 데이터 초기화 및 첫 번째 컷을 위한 대기열 시작
+                    this.state.photos = [];
+                    this.state.currentShotIndex = 1;
                     this.startPreShotTimer();
                 };
             } catch (err) {
@@ -601,13 +604,15 @@
             }
         },
 
-        // 촬영 전 10초 대기 및 필터 고르는 화면
+        // 매 사진 촬영 전 10초 대기 및 필터 고르는 화면
         startPreShotTimer() {
+            this.elements.counter.innerText = `${this.state.currentShotIndex} / 4`;
             this.state.countdownValue = 10;
             this.elements.preShotPanel.style.display = 'flex';
             this.elements.message.innerText = "필터를 고르고 촬영을 준비하세요!";
             this.elements.countdown10s.innerText = `${this.state.countdownValue}초 후 촬영 시작!`;
 
+            if (this.state.timerInterval) clearInterval(this.state.timerInterval);
             this.state.timerInterval = setInterval(() => {
                 this.state.countdownValue--;
                 if(this.state.countdownValue > 0) {
@@ -620,49 +625,50 @@
 
         // 10초를 다 기다리지 않고 바로 촬영을 시작하는 함수
         skipTimerAndStart() {
-            clearInterval(this.state.timerInterval);
+            if (this.state.timerInterval) clearInterval(this.state.timerInterval);
             this.elements.preShotPanel.style.display = 'none';
-            this.startShootingSequence();
+            this.executeShot();
         },
 
         sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
         },
 
-        async startShootingSequence() {
-            this.state.photos = [];
+        // 사진 1장을 찍고 다음 절차로 넘기는 함수 (매 컷 반복 실행됨)
+        async executeShot() {
+            this.elements.message.innerText = "예쁜 포즈를 취하세요! ✨";
             
-            for (let i = 1; i <= 4; i++) {
-                this.elements.counter.innerText = `${i} / 4`;
-                this.elements.message.innerText = "예쁜 포즈를 취하세요! ✨";
-                
-                for (let count = 3; count > 0; count--) {
-                    this.elements.timer.innerText = count;
-                    this.elements.timer.style.display = 'block';
-                    await this.sleep(1000);
-                }
-                
-                this.elements.timer.style.display = 'none';
-                
-                this.elements.flash.classList.add('active');
-                this.captureFrame();
-                
-                setTimeout(() => {
-                    this.elements.flash.classList.remove('active');
-                }, 500);
-
-                if (i < 4) {
-                    this.elements.message.innerText = "다음 사진을 준비하세요!";
-                    await this.sleep(1500);
-                }
+            // 3초 카운트다운
+            for (let count = 3; count > 0; count--) {
+                this.elements.timer.innerText = count;
+                this.elements.timer.style.display = 'block';
+                await this.sleep(1000);
             }
-
-            this.stopCamera();
-            this.elements.message.innerText = "수고하셨습니다! 🎈";
-            await this.sleep(1000);
             
-            this.showScreen('result-screen');
-            await this.renderHighRes(); 
+            this.elements.timer.style.display = 'none';
+            
+            // 플래시 및 캡처 (선택된 필터 상태도 함께 캡처 시 저장됨)
+            this.elements.flash.classList.add('active');
+            this.captureFrame();
+            
+            setTimeout(() => {
+                this.elements.flash.classList.remove('active');
+            }, 500);
+
+            // 다음 사진 촬영을 위한 대기 또는 완료 처리
+            if (this.state.currentShotIndex < 4) {
+                this.elements.message.innerText = "다음 사진을 준비하세요!";
+                await this.sleep(1500); // 캡처 직후 약간의 인터벌
+                this.state.currentShotIndex++;
+                this.startPreShotTimer(); // 다음 컷을 위해 다시 필터/10초 대기 화면 표시
+            } else {
+                this.elements.message.innerText = "수고하셨습니다! 🎈";
+                await this.sleep(1500);
+                
+                this.stopCamera();
+                this.showScreen('result-screen');
+                await this.renderHighRes(); 
+            }
         },
 
         captureFrame() {
@@ -694,7 +700,11 @@
                 0, 0, canvas.width, canvas.height
             );
             
-            this.state.photos.push(canvas.toDataURL('image/png'));
+            // 이미지와 함께 '당시 선택되어 있던 필터'를 객체 형태로 저장
+            this.state.photos.push({
+                url: canvas.toDataURL('image/png'),
+                filter: this.state.currentFilter
+            });
         },
 
         stopCamera() {
@@ -724,13 +734,14 @@
             ctx.fillStyle = this.state.frameColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 기존 95%에서 5% 크기 증가 (셀 크기에 딱 맞게 100%로 설정)
+            // 셀 크기에 딱 맞게 100%로 설정
             const imgWidth = cellWidth * 1.0;
             const imgHeight = cellHeight * 1.0;
 
             for (let i = 0; i < this.state.photos.length; i++) {
+                const photoObj = this.state.photos[i]; // 객체 데이터 접근
                 const img = new Image();
-                img.src = this.state.photos[i];
+                img.src = photoObj.url;
                 await new Promise(resolve => img.onload = resolve);
                 
                 const cellX = paddingX;
@@ -745,9 +756,9 @@
                 ctx.fillRect(drawX, drawY, imgWidth, imgHeight); 
                 ctx.restore();
                 
-                // 뽀샤시 필터
+                // 해당 컷 촬영 당시 선택한 필터 적용 (개별 적용)
                 ctx.save();
-                if (this.state.currentFilter === 'beauty') {
+                if (photoObj.filter === 'beauty') {
                     ctx.filter = 'brightness(1.15) contrast(1.05) saturate(1.2)';
                 }
                 ctx.drawImage(img, drawX, drawY, imgWidth, imgHeight);
