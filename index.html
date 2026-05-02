@@ -202,6 +202,29 @@
             transform: scaleX(-1); /* 거울 모드 (좌우 반전) */
         }
 
+        /* 가이드라인 오버레이 (사진이 찍히는 실제 영역 표시) */
+        .guide-wrapper {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px; /* 화면 가장자리 여백 */
+            pointer-events: none;
+            z-index: 5;
+            overflow: hidden;
+        }
+
+        .guide-box {
+            width: 100%;
+            max-height: 100%;
+            aspect-ratio: 4 / 3; /* 4:3 비율 고정 */
+            border: 3px dashed rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5); /* 찍히지 않는 바깥 영역 어둡게 */
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+
         .camera-overlay {
             position: absolute;
             top: 0;
@@ -235,6 +258,7 @@
             font-weight: 900;
             text-shadow: 0 4px 10px rgba(0,0,0,0.5);
             display: none;
+            z-index: 20; /* 가이드라인 위로 올라오도록 설정 */
         }
 
         .flash {
@@ -258,11 +282,13 @@
         /* [결과 화면] */
         #result-screen {
             background-color: #eaeaea;
+            display: block; /* flex를 해제하여 내부 스크롤이 가능하도록 변경 */
+            overflow-y: auto; /* 화면이 작을 경우 스크롤 생성 */
         }
 
         .result-container {
             width: 100%;
-            height: 70%;
+            height: 60vh; /* 화면 높이의 60%를 차지하도록 수정 */
             display: flex;
             justify-content: center;
             align-items: center;
@@ -280,11 +306,12 @@
 
         .action-panel {
             width: 100%;
-            height: 30%;
+            min-height: 40vh; /* 화면 높이의 최소 40% 이상을 차지하도록 수정 */
+            height: auto;
             background: white;
             border-top-left-radius: 20px;
             border-top-right-radius: 20px;
-            padding: 20px;
+            padding: 20px 20px 40px 20px; /* 모바일 하단 스크롤 여유를 위해 패딩 추가 */
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -320,7 +347,10 @@
             font-size: 0.9rem;
             color: #666;
             margin-bottom: 10px;
-            height: 20px;
+            min-height: 20px;
+            height: auto;
+            white-space: pre-wrap; /* 줄바꿈 텍스트를 정상적으로 표시 */
+            line-height: 1.4;
         }
 
         #qrcode {
@@ -364,6 +394,12 @@
     <div id="camera-screen" class="screen">
         <div class="video-container">
             <video id="video" autoplay playsinline></video>
+            
+            <!-- 가이드라인 (점선 및 어두운 배경) 추가 -->
+            <div class="guide-wrapper">
+                <div id="guide-box" class="guide-box"></div>
+            </div>
+
             <div class="camera-overlay">
                 <div class="status-bar">
                     <span id="shot-counter">0 / 4</span>
@@ -507,6 +543,7 @@
         // 현재 비디오 프레임을 캔버스에 4:3 비율로 캡처
         captureFrame() {
             const canvas = document.createElement('canvas');
+            // 최종 사진에 들어갈 가로세로 규격 (4:3)
             canvas.width = 640; 
             canvas.height = 480;
             const ctx = canvas.getContext('2d');
@@ -515,25 +552,24 @@
             ctx.translate(canvas.width, 0);
             ctx.scale(-1, 1);
             
-            const videoRatio = this.elements.video.videoWidth / this.elements.video.videoHeight;
-            const targetRatio = canvas.width / canvas.height;
-            let drawWidth = this.elements.video.videoWidth;
-            let drawHeight = this.elements.video.videoHeight;
-            let offsetX = 0;
-            let offsetY = 0;
+            const video = this.elements.video;
+            const guide = document.getElementById('guide-box');
 
-            // 중앙 크롭 로직
-            if (videoRatio > targetRatio) {
-                drawWidth = drawHeight * targetRatio;
-                offsetX = (this.elements.video.videoWidth - drawWidth) / 2;
-            } else {
-                drawHeight = drawWidth / targetRatio;
-                offsetY = (this.elements.video.videoHeight - drawHeight) / 2;
-            }
+            // 화면에 보이는 video 요소의 크기와 실제 카메라 해상도의 비율 계산 (object-fit: cover 기준)
+            const scale = Math.max(video.clientWidth / video.videoWidth, video.clientHeight / video.videoHeight);
+            
+            // 화면상 점선 가이드 박스가 실제 원본 비디오 해상도에서 차지하는 크기로 역산
+            const guideIntrinsicWidth = guide.offsetWidth / scale;
+            const guideIntrinsicHeight = guide.offsetHeight / scale;
+            
+            // 비디오와 가이드박스 모두 화면 중앙에 위치하므로, 실제 비디오 해상도 기준 정중앙 크롭 좌표 계산
+            const cropX = (video.videoWidth - guideIntrinsicWidth) / 2;
+            const cropY = (video.videoHeight - guideIntrinsicHeight) / 2;
 
+            // 계산된 점선 영역만큼만 정확하게 잘라내어 캔버스에 그림
             ctx.drawImage(
-                this.elements.video,
-                offsetX, offsetY, drawWidth, drawHeight,
+                video,
+                cropX, cropY, guideIntrinsicWidth, guideIntrinsicHeight,
                 0, 0, canvas.width, canvas.height
             );
             
@@ -646,9 +682,10 @@
 
             // [보안 우회] CORS 정책 때문에 로컬(file://) 환경에서 toDataURL 호출 시 에러가 날 수 있음.
             try {
-                this.state.finalCanvasDataUrl = canvas.toDataURL('image/png');
+                // 아이폰 호환성을 위해 image/jpeg 포맷으로 생성
+                this.state.finalCanvasDataUrl = canvas.toDataURL('image/jpeg', 1.0);
                 this.elements.finalPreview.src = this.state.finalCanvasDataUrl;
-                this.elements.statusText.innerText = "예쁜 네컷 사진이 완성되었어요! 🎈";
+                this.elements.statusText.innerText = "예쁜 네컷 사진이 완성되었어요! 🎈\n(아이폰은 사진을 꾹 눌러서 저장해주세요)";
             } catch (e) {
                 console.error(e);
                 alert("브라우저 보안 문제(CORS)로 이미지를 생성할 수 없습니다. 웹 서버(Live Server) 환경에서 실행해주세요.");
@@ -660,7 +697,8 @@
             if (!this.state.finalCanvasDataUrl) return;
             
             const link = document.createElement('a');
-            link.download = `감자네컷_양진초_5학년_1반_${Date.now()}.png`;
+            // 확장자를 .jpg로 변경하여 스마트폰 사진 앱에서 안전하게 인식하도록 조치
+            link.download = `감자네컷_양진초_5학년_1반_${Date.now()}.jpg`;
             link.href = this.state.finalCanvasDataUrl;
             document.body.appendChild(link);
             link.click();
