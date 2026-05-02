@@ -216,13 +216,24 @@
         }
 
         .guide-box {
-            width: 100%;
-            max-height: 100%;
-            aspect-ratio: 4 / 3; /* 4:3 비율 고정 */
             border: 3px dashed rgba(255, 255, 255, 0.9);
             box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5); /* 찍히지 않는 바깥 영역 어둡게 */
             border-radius: 8px;
             box-sizing: border-box;
+            transition: aspect-ratio 0.3s ease;
+        }
+
+        /* 디바이스 방향에 따른 가이드박스 비율 설정 */
+        .guide-box.portrait {
+            aspect-ratio: 3 / 4;
+            width: 100%;
+            max-height: 100%;
+        }
+
+        .guide-box.landscape {
+            aspect-ratio: 4 / 3;
+            height: 100%;
+            max-width: 100%;
         }
 
         .camera-overlay {
@@ -277,6 +288,17 @@
         @keyframes flashAnim {
             0% { opacity: 1; }
             100% { opacity: 0; }
+        }
+
+        /* 새로 추가된 사진 촬영 버튼 디자인 */
+        .btn-shutter {
+            background-color: #ff6b6b;
+            color: white;
+            font-size: 1.5rem;
+            padding: 15px 40px;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.3);
+            pointer-events: auto; /* 오버레이 위에서도 클릭 가능하도록 설정 */
+            margin: 0 auto 20px auto;
         }
 
         /* [결과 화면] */
@@ -341,6 +363,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            margin-bottom: auto; /* 데코 이미지를 하단으로 밀어냄 */
         }
 
         #status-text {
@@ -363,6 +386,14 @@
         #qrcode img {
             display: block;
             margin: 0 auto;
+        }
+
+        /* 결과 화면 하단 여백 데코 이미지 */
+        #deco-image {
+            width: 140px;
+            border-radius: 15px;
+            margin-top: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
         }
     </style>
 </head>
@@ -405,6 +436,8 @@
                     <span id="shot-counter">0 / 4</span>
                     <span id="shot-message">준비하세요!</span>
                 </div>
+                <!-- 새로 추가된 사진 촬영 버튼 (기본 숨김) -->
+                <button id="shutter-btn" class="btn-shutter" onclick="app.startShootingSequence()" style="display: none;">📸 사진 촬영 시작</button>
             </div>
             <div id="timer" class="timer">3</div>
             <div id="flash" class="flash"></div>
@@ -425,6 +458,8 @@
                 <p id="status-text">사진을 예쁘게 꾸미는 중이에요...</p>
                 <div id="qrcode"></div>
             </div>
+            <!-- 하단 여백을 채우는 데코 이미지 -->
+            <img id="deco-image" src="https://i.ibb.co/VWXh9drG/gamjaban.jpg" alt="감자반 장식">
         </div>
     </div>
 </div>
@@ -442,7 +477,8 @@
             stream: null,
             photos: [],
             finalCanvasDataUrl: null,
-            isUploading: false
+            isUploading: false,
+            orientation: 'portrait' // 촬영 방향 상태 추가
         },
         elements: {
             video: document.getElementById('video'),
@@ -453,7 +489,9 @@
             finalPreview: document.getElementById('final-preview'),
             shareBtn: document.getElementById('share-btn'),
             statusText: document.getElementById('status-text'),
-            qrcodeContainer: document.getElementById('qrcode')
+            qrcodeContainer: document.getElementById('qrcode'),
+            decoImage: document.getElementById('deco-image'), // 데코 이미지 요소 추가
+            shutterBtn: document.getElementById('shutter-btn') // 촬영 버튼 요소 추가
         },
 
         // 화면 전환 함수 (SPA)
@@ -469,9 +507,34 @@
             btnElement.classList.add('selected');
         },
 
+        // 디바이스 방향에 따른 가이드박스 업데이트
+        updateOrientation() {
+            const guideBox = document.getElementById('guide-box');
+            // 화면의 가로가 더 길면 landscape, 아니면 portrait
+            const isLandscape = window.innerWidth > window.innerHeight;
+            this.state.orientation = isLandscape ? 'landscape' : 'portrait';
+            
+            if (isLandscape) {
+                guideBox.classList.remove('portrait');
+                guideBox.classList.add('landscape');
+            } else {
+                guideBox.classList.remove('landscape');
+                guideBox.classList.add('portrait');
+            }
+        },
+
         // 카메라 권한 요청 및 비디오 스트림 연결
         async initCamera() {
             this.showScreen('camera-screen');
+            this.updateOrientation(); // 초기 방향 설정
+            
+            // 디바이스 회전 시 가이드라인 실시간 대응
+            window.addEventListener('resize', () => {
+                if(document.getElementById('camera-screen').classList.contains('active')) {
+                    this.updateOrientation();
+                }
+            });
+
             try {
                 this.state.stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
@@ -483,9 +546,10 @@
                 });
                 this.elements.video.srcObject = this.state.stream;
                 
-                // 비디오 메타데이터가 로드되면 약간의 지연 후 촬영 시작
+                // 비디오 메타데이터가 로드되면 촬영 버튼 표시 (자동 촬영 제거)
                 this.elements.video.onloadedmetadata = () => {
-                    setTimeout(() => this.startShootingSequence(), 1500);
+                    this.elements.message.innerText = "버튼을 눌러 촬영을 시작하세요!";
+                    this.elements.shutterBtn.style.display = 'block';
                 };
             } catch (err) {
                 console.error("Camera error:", err);
@@ -501,6 +565,8 @@
 
         // 4장 연속 촬영 시퀀스
         async startShootingSequence() {
+            // 촬영이 시작되면 버튼을 숨깁니다.
+            this.elements.shutterBtn.style.display = 'none';
             this.state.photos = [];
             
             for (let i = 1; i <= 4; i++) {
@@ -539,13 +605,13 @@
             this.showScreen('result-screen');
             await this.renderHighRes(); 
         },
-
-        // 현재 비디오 프레임을 캔버스에 4:3 비율로 캡처
+        // 현재 비디오 프레임을 캔버스에 비율(가로/세로)에 맞춰 캡처
         captureFrame() {
             const canvas = document.createElement('canvas');
-            // 최종 사진에 들어갈 가로세로 규격 (4:3)
-            canvas.width = 640; 
-            canvas.height = 480;
+            // 현재 설정된 방향(가로/세로)에 따라 캔버스 규격 동적 설정
+            const isLandscape = this.state.orientation === 'landscape';
+            canvas.width = isLandscape ? 640 : 480; 
+            canvas.height = isLandscape ? 480 : 640;
             const ctx = canvas.getContext('2d');
             
             // 거울 모드(좌우 반전) 적용
@@ -596,8 +662,11 @@
             const paddingY = 40;
             const bottomPadding = 420; // 하단 캐릭터 이미지 및 텍스트 공간 확보
             const gap = 20;
+            
             const photoWidth = canvas.width - (paddingX * 2);
-            const photoHeight = (photoWidth * 3) / 4; 
+            // 가로/세로 촬영 모드에 따라 사진의 렌더링 높이를 다르게 계산
+            const isLandscape = this.state.orientation === 'landscape';
+            const photoHeight = isLandscape ? (photoWidth * 3) / 4 : (photoWidth * 4) / 3; 
             
             // 캔버스 총 세로 길이 계산
             canvas.height = paddingY + (photoHeight * 4) + (gap * 3) + bottomPadding;
@@ -714,14 +783,14 @@
             this.elements.shareBtn.innerText = "⏳ 업로드 중...";
             this.elements.statusText.innerText = "서버에 업로드하는 중이에요...";
             this.elements.qrcodeContainer.innerHTML = ''; // QR코드 영역 초기화
+            
+            // QR코드 생성 공간 확보를 위해 하단 데코 이미지 숨기기
+            if(this.elements.decoImage) {
+                this.elements.decoImage.style.display = 'none';
+            }
 
             try {
-                // Base64 포맷에서 data:image/png;base64, 부분을 제거
-                const base64Data = this.state.finalCanvasDataUrl.split(',')[1];
-                
-                const formData = new FormData();
-                formData.append('image', base64Data);
-                // API상 특정 폴더 지정은 불가능하여 식별하기 쉽도록 파일명(name)에 Prefix 지정
+                // Base64 포맷에서 data:image/jpeg;base64, 부분을 제거
                 formData.append('name', 'four_cut_' + Date.now()); 
                 formData.append('expiration', '7200'); // 7200초 = 2시간 유지
 
@@ -757,6 +826,11 @@
                 this.elements.statusText.innerText = "업로드에 실패했어요. 다시 시도해주세요. 😢";
                 this.elements.shareBtn.innerText = "🔗 다시 공유";
                 this.elements.shareBtn.disabled = false;
+                
+                // 업로드 실패 시 다시 데코 이미지 보이기
+                if(this.elements.decoImage) {
+                    this.elements.decoImage.style.display = 'block';
+                }
             } finally {
                 this.state.isUploading = false;
             }
