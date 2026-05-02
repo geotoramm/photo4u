@@ -209,31 +209,17 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px; /* 화면 가장자리 여백 */
             pointer-events: none;
             z-index: 5;
-            overflow: hidden;
+            overflow: hidden; /* 영역 밖으로 나가는 그림자를 깔끔하게 자름 */
         }
 
         .guide-box {
             border: 3px dashed rgba(255, 255, 255, 0.9);
-            box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5); /* 찍히지 않는 바깥 영역 어둡게 */
+            box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5); /* 찍히지 않는 바깥 영역 어둡게 처리 */
             border-radius: 8px;
             box-sizing: border-box;
-            transition: aspect-ratio 0.3s ease;
-        }
-
-        /* 디바이스 방향에 따른 가이드박스 비율 설정 */
-        .guide-box.portrait {
-            aspect-ratio: 3 / 4;
-            width: 100%;
-            max-height: 100%;
-        }
-
-        .guide-box.landscape {
-            aspect-ratio: 4 / 3;
-            height: 100%;
-            max-width: 100%;
+            /* 가이드 박스의 width와 height는 JS에서 오차 없이 정확한 비율(4:3)로 계산되어 인라인으로 주입됨 */
         }
 
         .camera-overlay {
@@ -290,7 +276,7 @@
             100% { opacity: 0; }
         }
 
-        /* 새로 추가된 사진 촬영 버튼 디자인 */
+        /* 사진 촬영 버튼 디자인 */
         .btn-shutter {
             background-color: #ff6b6b;
             color: white;
@@ -436,7 +422,7 @@
                     <span id="shot-counter">0 / 4</span>
                     <span id="shot-message">준비하세요!</span>
                 </div>
-                <!-- 새로 추가된 사진 촬영 버튼 (기본 숨김) -->
+                <!-- 사진 촬영 버튼 (기본 숨김) -->
                 <button id="shutter-btn" class="btn-shutter" onclick="app.startShootingSequence()" style="display: none;">📸 사진 촬영 시작</button>
             </div>
             <div id="timer" class="timer">3</div>
@@ -490,8 +476,8 @@
             shareBtn: document.getElementById('share-btn'),
             statusText: document.getElementById('status-text'),
             qrcodeContainer: document.getElementById('qrcode'),
-            decoImage: document.getElementById('deco-image'), // 데코 이미지 요소 추가
-            shutterBtn: document.getElementById('shutter-btn') // 촬영 버튼 요소 추가
+            decoImage: document.getElementById('deco-image'),
+            shutterBtn: document.getElementById('shutter-btn')
         },
 
         // 화면 전환 함수 (SPA)
@@ -507,26 +493,39 @@
             btnElement.classList.add('selected');
         },
 
-        // 디바이스 방향에 따른 가이드박스 업데이트
+        // [중요] 디바이스 방향에 따른 가이드박스(미리보기) 비율 완벽 동기화
         updateOrientation() {
+            const wrapper = document.querySelector('.guide-wrapper');
             const guideBox = document.getElementById('guide-box');
+            
             // 화면의 가로가 더 길면 landscape, 아니면 portrait
             const isLandscape = window.innerWidth > window.innerHeight;
             this.state.orientation = isLandscape ? 'landscape' : 'portrait';
             
-            if (isLandscape) {
-                guideBox.classList.remove('portrait');
-                guideBox.classList.add('landscape');
+            // CSS 대신 JS로 점선 영역의 비율을 수학적으로 정확하게 픽셀 고정 (가장자리 여백 20px씩 고려)
+            const padding = 20;
+            const wWidth = Math.max(10, wrapper.clientWidth - (padding * 2));
+            const wHeight = Math.max(10, wrapper.clientHeight - (padding * 2));
+            
+            // 1 & 3: 가로모드일 경우 무조건 4:3, 세로모드일 경우 무조건 3:4 로 완벽 일치 보장
+            const targetRatio = isLandscape ? 4 / 3 : 3 / 4;
+            
+            if (wWidth / wHeight > targetRatio) {
+                // Wrapper가 목표 비율보다 더 납작함 -> 높이를 꽉 채우고 넓이를 비율에 맞춤
+                guideBox.style.height = wHeight + 'px';
+                guideBox.style.width = (wHeight * targetRatio) + 'px';
             } else {
-                guideBox.classList.remove('landscape');
-                guideBox.classList.add('portrait');
+                // Wrapper가 목표 비율보다 더 길쭉함 -> 넓이를 꽉 채우고 높이를 비율에 맞춤
+                guideBox.style.width = wWidth + 'px';
+                guideBox.style.height = (wWidth / targetRatio) + 'px';
             }
         },
 
         // 카메라 권한 요청 및 비디오 스트림 연결
         async initCamera() {
             this.showScreen('camera-screen');
-            this.updateOrientation(); // 초기 방향 설정
+            // 진입 시 방향 설정 및 가이드라인 렌더링
+            this.updateOrientation(); 
             
             // 디바이스 회전 시 가이드라인 실시간 대응
             window.addEventListener('resize', () => {
@@ -546,7 +545,7 @@
                 });
                 this.elements.video.srcObject = this.state.stream;
                 
-                // 비디오 메타데이터가 로드되면 촬영 버튼 표시 (자동 촬영 제거)
+                // 비디오 메타데이터가 로드되면 촬영 버튼 표시
                 this.elements.video.onloadedmetadata = () => {
                     this.elements.message.innerText = "버튼을 눌러 촬영을 시작하세요!";
                     this.elements.shutterBtn.style.display = 'block';
@@ -605,11 +604,13 @@
             this.showScreen('result-screen');
             await this.renderHighRes(); 
         },
-        // 현재 비디오 프레임을 캔버스에 비율(가로/세로)에 맞춰 캡처
+
+        // [핵심] 현재 비디오 프레임을 가이드 박스와 동일하게 캡처 (비율 일치)
         captureFrame() {
             const canvas = document.createElement('canvas');
-            // 현재 설정된 방향(가로/세로)에 따라 캔버스 규격 동적 설정
             const isLandscape = this.state.orientation === 'landscape';
+            
+            // 캔버스 크기를 가이드 박스 비율과 동일한 규격으로 완전 고정
             canvas.width = isLandscape ? 640 : 480; 
             canvas.height = isLandscape ? 480 : 640;
             const ctx = canvas.getContext('2d');
@@ -621,21 +622,25 @@
             const video = this.elements.video;
             const guide = document.getElementById('guide-box');
 
-            // 화면에 보이는 video 요소의 크기와 실제 카메라 해상도의 비율 계산 (object-fit: cover 기준)
-            const scale = Math.max(video.clientWidth / video.videoWidth, video.clientHeight / video.videoHeight);
-            
-            // 화면상 점선 가이드 박스가 실제 원본 비디오 해상도에서 차지하는 크기로 역산
-            const guideIntrinsicWidth = guide.offsetWidth / scale;
-            const guideIntrinsicHeight = guide.offsetHeight / scale;
-            
-            // 비디오와 가이드박스 모두 화면 중앙에 위치하므로, 실제 비디오 해상도 기준 정중앙 크롭 좌표 계산
-            const cropX = (video.videoWidth - guideIntrinsicWidth) / 2;
-            const cropY = (video.videoHeight - guideIntrinsicHeight) / 2;
+            // 렌더링된 요소의 실제 화면 위치/크기 정보 측정
+            const videoRect = video.getBoundingClientRect();
+            const guideRect = guide.getBoundingClientRect();
 
-            // 계산된 점선 영역만큼만 정확하게 잘라내어 캔버스에 그림
+            // object-fit: cover 에 의한 실제 비디오 원본 대비 화면 확대 비율 계산
+            const scale = Math.max(videoRect.width / video.videoWidth, videoRect.height / video.videoHeight);
+            
+            // 점선 가이드 박스 영역(사용자가 보는 것)이 실제 원본 비디오 해상도 내에서 차지하는 픽셀 크기
+            const cropW = guideRect.width / scale;
+            const cropH = guideRect.height / scale;
+            
+            // 비디오와 가이드박스 모두 중앙 정렬되어 있으므로 정중앙을 기준으로 크롭 시작 좌표(X, Y) 계산
+            const cropX = (video.videoWidth - cropW) / 2;
+            const cropY = (video.videoHeight - cropH) / 2;
+
+            // 계산된 정확한 영역만큼만 잘라내어 캔버스에 그림 (미리보기 비율 = 결과 비율 100% 일치)
             ctx.drawImage(
                 video,
-                cropX, cropY, guideIntrinsicWidth, guideIntrinsicHeight,
+                cropX, cropY, cropW, cropH,
                 0, 0, canvas.width, canvas.height
             );
             
@@ -650,7 +655,7 @@
             }
         },
 
-        // [핵심] 고화질 네컷 캔버스 합성 렌더링
+        // 고화질 네컷 캔버스 합성 렌더링
         async renderHighRes() {
             this.elements.statusText.innerText = "고화질 이미지를 준비하는 중이에요...";
             
@@ -664,7 +669,7 @@
             const gap = 20;
             
             const photoWidth = canvas.width - (paddingX * 2);
-            // 가로/세로 촬영 모드에 따라 사진의 렌더링 높이를 다르게 계산
+            // 가로/세로 촬영 모드에 따라 사진의 렌더링 높이를 다르게 계산하여 여백 없이 일치시킴
             const isLandscape = this.state.orientation === 'landscape';
             const photoHeight = isLandscape ? (photoWidth * 3) / 4 : (photoWidth * 4) / 3; 
             
@@ -791,6 +796,10 @@
 
             try {
                 // Base64 포맷에서 data:image/jpeg;base64, 부분을 제거
+                const base64Data = this.state.finalCanvasDataUrl.split(',')[1];
+                
+                const formData = new FormData();
+                formData.append('image', base64Data);
                 formData.append('name', 'four_cut_' + Date.now()); 
                 formData.append('expiration', '7200'); // 7200초 = 2시간 유지
 
