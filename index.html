@@ -133,38 +133,69 @@
             50% { opacity: 0.3; }
         }
 
-        /* [프레임 선택 화면] */
+        /* [옵션 선택 화면 (기존 프레임 화면에서 확장)] */
         #frame-screen {
             background-color: #fff9e6;
             padding: 20px;
         }
 
         #frame-screen h2 {
-            font-size: 2rem;
-            margin-bottom: 30px;
+            font-size: 1.5rem;
+            margin-bottom: 15px;
             text-align: center;
+        }
+
+        .layout-options {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 30px;
+        }
+
+        .layout-btn {
+            padding: 15px 10px;
+            border-radius: 15px;
+            border: 4px solid transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #333;
+            background-color: white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+
+        .layout-btn.selected {
+            border-color: #ff6b6b;
+            background-color: #fff0f0;
+            transform: scale(1.05);
         }
 
         .frame-options {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 20px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
             width: 100%;
             max-width: 400px;
             margin-bottom: 40px;
         }
 
         .frame-btn {
-            aspect-ratio: 3/4;
+            aspect-ratio: 1/1;
             border-radius: 15px;
             border: 4px solid transparent;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.2rem;
+            font-size: 1rem;
             font-weight: bold;
             color: #333;
             box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            padding: 5px;
+            word-break: keep-all;
         }
 
         .frame-btn.selected {
@@ -445,15 +476,23 @@
         <p class="blink-text">화면을 터치해서 시작하세요!</p>
     </div>
 
-    <!-- 2. 프레임 선택 화면 -->
+    <!-- 2. 옵션(배열/프레임) 선택 화면 -->
     <div id="frame-screen" class="screen">
+        
+        <h2>어떤 모양으로 만들까요?</h2>
+        <div class="layout-options">
+            <button class="layout-btn selected" onclick="app.selectLayout('1x4', this)">1x4<br>(네컷 세로)</button>
+            <button class="layout-btn" onclick="app.selectLayout('2x2', this)">2x2<br>(네컷 격자)</button>
+        </div>
+
         <h2>어떤 배경색으로 할까요?</h2>
         <div class="frame-options">
-            <button class="frame-btn selected" style="background-color: #f7e600;" onclick="app.selectFrame('#f7e600', this)">노랑 감자</button>
-            <button class="frame-btn" style="background-color: #ffb6c1;" onclick="app.selectFrame('#ffb6c1', this)">분홍 딸기</button>
-            <button class="frame-btn" style="background-color: #87ceeb; color: white;" onclick="app.selectFrame('#87ceeb', this)">파랑 하늘</button>
-            <button class="frame-btn" style="background-color: #000000; color: white;" onclick="app.selectFrame('#000000', this)">시크 블랙</button>
+            <button class="frame-btn selected" style="background-color: #f7e600;" onclick="app.selectFrame('#f7e600', this)">노랑</button>
+            <button class="frame-btn" style="background-color: #ffb6c1;" onclick="app.selectFrame('#ffb6c1', this)">분홍</button>
+            <button class="frame-btn" style="background-color: #87ceeb; color: white;" onclick="app.selectFrame('#87ceeb', this)">하늘</button>
+            <button class="frame-btn" style="background-color: #000000; color: white;" onclick="app.selectFrame('#000000', this)">블랙</button>
         </div>
+        
         <button class="btn-primary" onclick="app.initCamera()">사진 찍으러 가기</button>
     </div>
 
@@ -512,6 +551,7 @@
     
     const app = {
         state: {
+            layout: '1x4', // 1x4 또는 2x2 배열 설정
             frameColor: '#f7e600',
             stream: null,
             photos: [], // 매 사진마다 객체 형태로 저장 (url, filter)
@@ -541,6 +581,12 @@
         showScreen(screenId) {
             document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
             document.getElementById(screenId).classList.add('active');
+        },
+
+        selectLayout(layout, btnElement) {
+            this.state.layout = layout;
+            document.querySelectorAll('.layout-btn').forEach(btn => btn.classList.remove('selected'));
+            btnElement.classList.add('selected');
         },
 
         selectFrame(color, btnElement) {
@@ -720,16 +766,33 @@
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
-            canvas.width = 600;
-            const paddingX = 40;
-            const paddingY = 40;
-            const bottomPadding = 420; 
-            const gap = 20;
+            let canvasWidth, canvasHeight, cellWidth, cellHeight;
             
-            const cellWidth = canvas.width - (paddingX * 2);
-            const cellHeight = (cellWidth * 3) / 4; 
+            // 상좌우 여백(Padding)을 40에서 20으로 대폭 축소하여 사진을 크게 키움 (1x4, 2x2 공통 적용)
+            const paddingX = 20; 
+            const paddingY = 20; 
+            const gap = 15; // 사진 사이의 간격도 여백에 어울리게 살짝 줄임
             
-            canvas.height = paddingY + (cellHeight * 4) + (gap * 3) + bottomPadding;
+            let bottomPadding = 280;
+            
+            if (this.state.layout === '1x4') {
+                // 1x4 세로 배열 렌더링 설정
+                bottomPadding = 270; // 텍스트와 이미지 간격에 최적화
+                canvasWidth = 600;
+                cellWidth = canvasWidth - (paddingX * 2);
+                cellHeight = (cellWidth * 3) / 4; 
+                canvasHeight = paddingY + (cellHeight * 4) + (gap * 3) + bottomPadding;
+            } else {
+                // 2x2 격자 배열 렌더링 설정
+                bottomPadding = 140; // 가로 배치에 맞게 하단 여백 최소화
+                canvasWidth = 800; 
+                cellWidth = (canvasWidth - (paddingX * 2) - gap) / 2;
+                cellHeight = (cellWidth * 3) / 4;
+                canvasHeight = paddingY + (cellHeight * 2) + gap + bottomPadding;
+            }
+
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
 
             ctx.fillStyle = this.state.frameColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -739,13 +802,22 @@
             const imgHeight = cellHeight * 1.0;
 
             for (let i = 0; i < this.state.photos.length; i++) {
-                const photoObj = this.state.photos[i]; // 객체 데이터 접근
+                const photoObj = this.state.photos[i]; 
                 const img = new Image();
                 img.src = photoObj.url;
                 await new Promise(resolve => img.onload = resolve);
                 
-                const cellX = paddingX;
-                const cellY = paddingY + (i * (cellHeight + gap));
+                let cellX, cellY;
+                
+                if (this.state.layout === '1x4') {
+                    cellX = paddingX;
+                    cellY = paddingY + (i * (cellHeight + gap));
+                } else {
+                    const col = i % 2; // 0, 1, 0, 1
+                    const row = Math.floor(i / 2); // 0, 0, 1, 1
+                    cellX = paddingX + (col * (cellWidth + gap));
+                    cellY = paddingY + (row * (cellHeight + gap));
+                }
 
                 const drawX = cellX + (cellWidth - imgWidth) / 2;
                 const drawY = cellY + (cellHeight - imgHeight) / 2;
@@ -774,42 +846,114 @@
                 logoImg.onerror = () => { logoImg.failed = true; resolve(); };
             });
 
-            let textStartY = canvas.height - 160;
-
-            if (!logoImg.failed) {
-                const logoWidth = 220; 
-                const ratio = logoImg.height / logoImg.width;
-                const logoHeight = logoWidth * ratio;
-                
-                const logoX = (canvas.width - logoWidth) / 2;
-                const logoY = paddingY + (cellHeight * 4) + (gap * 3) + 30; 
-
-                ctx.save();
-                ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
-                ctx.shadowBlur = 15;
-                ctx.shadowOffsetY = 5;
-                ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
-                ctx.restore();
-
-                textStartY = logoY + logoHeight + 45; 
-            }
+            // 그리드 하단 Y좌표 계산
+            let gridBottomY = this.state.layout === '1x4' 
+                ? paddingY + (cellHeight * 4) + (gap * 3)
+                : paddingY + (cellHeight * 2) + gap;
 
             const isDarkBg = this.state.frameColor === '#000000';
-            ctx.fillStyle = isDarkBg ? '#ffffff' : '#333333';
-            ctx.textAlign = 'center';
-
-            ctx.font = 'bold 45px "Noto Sans KR", sans-serif';
-            ctx.fillText('🥔 감자네컷', canvas.width / 2, textStartY);
-
-            ctx.font = 'bold 22px "Noto Sans KR", sans-serif';
-            ctx.fillText('양진초등학교 5학년 1반', canvas.width / 2, textStartY + 40);
-
             const today = new Date();
             const dateStr = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, '0')}.${String(today.getDate()).padStart(2, '0')}`;
-            
-            ctx.font = '18px "Noto Sans KR", sans-serif';
-            ctx.fillStyle = isDarkBg ? '#dddddd' : '#666666';
-            ctx.fillText(`어린이날 기념 🎉 | ${dateStr}`, canvas.width / 2, textStartY + 75);
+
+            if (this.state.layout === '1x4') {
+                // [1x4 배열] 중앙 수직 정렬 디자인
+                let textStartY = canvas.height - 160;
+                ctx.textBaseline = 'alphabetic'; // 기본값으로 초기화
+
+                if (!logoImg.failed) {
+                    const logoWidth = 110; 
+                    const ratio = logoImg.height / logoImg.width;
+                    const logoHeight = logoWidth * ratio;
+                    
+                    const logoX = (canvas.width - logoWidth) / 2;
+                    const logoY = gridBottomY + 25; 
+
+                    ctx.save();
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+                    ctx.shadowBlur = 15;
+                    ctx.shadowOffsetY = 5;
+                    ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
+                    ctx.restore();
+
+                    textStartY = logoY + logoHeight + 45; 
+                } else {
+                    textStartY = gridBottomY + 50;
+                }
+
+                ctx.fillStyle = isDarkBg ? '#ffffff' : '#333333';
+                ctx.textAlign = 'center';
+                ctx.font = 'bold 45px "Noto Sans KR", sans-serif';
+                ctx.fillText('🥔 감자네컷', canvas.width / 2, textStartY);
+
+                ctx.font = 'bold 22px "Noto Sans KR", sans-serif';
+                ctx.fillText('양진초등학교 5학년 1반', canvas.width / 2, textStartY + 40);
+
+                ctx.font = '18px "Noto Sans KR", sans-serif';
+                ctx.fillStyle = isDarkBg ? '#dddddd' : '#666666';
+                ctx.fillText(`어린이날 기념 🎉 | ${dateStr}`, canvas.width / 2, textStartY + 75);
+
+            } else {
+                // [2x2 배열] 좌측 이미지, 우측 텍스트 평행 디자인 (높이 100% 핏하게 맞춤)
+                if (!logoImg.failed) {
+                    const logoWidth = 110; 
+                    const ratio = logoImg.height / logoImg.width;
+                    const logoHeight = logoWidth * ratio;
+
+                    const gapBetween = 30;
+                    const textBlockWidth = 240; 
+                    const totalWidth = logoWidth + gapBetween + textBlockWidth;
+                    const startX = (canvas.width - totalWidth) / 2;
+
+                    const logoX = startX;
+                    const logoY = gridBottomY + 15; 
+
+                    // 1. 좌측 캐릭터 이미지 그리기
+                    ctx.save();
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+                    ctx.shadowBlur = 15;
+                    ctx.shadowOffsetY = 5;
+                    ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
+                    ctx.restore();
+
+                    // 2. 우측 텍스트 그리기 (이미지 상단/중앙/하단 라인에 맞춰 정확히 분배)
+                    const textX = logoX + logoWidth + gapBetween;
+                    ctx.textAlign = 'left';
+
+                    // 타이틀 (상단 라인 맞춤)
+                    ctx.fillStyle = isDarkBg ? '#ffffff' : '#333333';
+                    ctx.font = 'bold 38px "Noto Sans KR", sans-serif';
+                    ctx.textBaseline = 'top'; 
+                    ctx.fillText('🥔 감자네컷', textX, logoY - 5);
+
+                    // 소속 정보 (중앙 라인 맞춤)
+                    ctx.font = 'bold 22px "Noto Sans KR", sans-serif';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('양진초등학교 5학년 1반', textX, logoY + (logoHeight / 2));
+
+                    // 날짜 정보 (하단 라인 맞춤)
+                    ctx.font = '18px "Noto Sans KR", sans-serif';
+                    ctx.fillStyle = isDarkBg ? '#dddddd' : '#666666';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText(`어린이날 기념 🎉 | ${dateStr}`, textX, logoY + logoHeight);
+
+                } else {
+                    // 이미지가 누락되었을 경우의 예외 처리
+                    const textStartY = gridBottomY + 50;
+                    ctx.fillStyle = isDarkBg ? '#ffffff' : '#333333';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'alphabetic';
+                    
+                    ctx.font = 'bold 45px "Noto Sans KR", sans-serif';
+                    ctx.fillText('🥔 감자네컷', canvas.width / 2, textStartY);
+
+                    ctx.font = 'bold 22px "Noto Sans KR", sans-serif';
+                    ctx.fillText('양진초등학교 5학년 1반', canvas.width / 2, textStartY + 40);
+
+                    ctx.font = '18px "Noto Sans KR", sans-serif';
+                    ctx.fillStyle = isDarkBg ? '#dddddd' : '#666666';
+                    ctx.fillText(`어린이날 기념 🎉 | ${dateStr}`, canvas.width / 2, textStartY + 75);
+                }
+            }
 
             try {
                 this.state.finalCanvasDataUrl = canvas.toDataURL('image/jpeg', 1.0);
