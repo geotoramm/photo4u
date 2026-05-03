@@ -230,7 +230,7 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
-            transform: scaleX(-1); /* 거울 모드 (좌우 반전) */
+            /* transform은 JS에서 방향에 따라 동적으로 설정합니다 */
         }
 
         /* 가이드라인 오버레이 */
@@ -269,10 +269,31 @@
         .status-bar {
             display: flex;
             justify-content: space-between;
+            align-items: center; /* 카메라 전환 버튼 추가로 인해 정렬 맞춤 */
             color: white;
             font-size: 1.5rem;
             font-weight: bold;
             text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            width: 100%;
+        }
+
+        /* 카메라 전환 버튼 스타일 */
+        .switch-camera-btn {
+            background-color: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            backdrop-filter: blur(4px);
+            transition: background-color 0.2s;
+            pointer-events: auto; /* 오버레이 위에서 클릭 가능하게 설정 */
+        }
+
+        .switch-camera-btn:active {
+            background-color: rgba(255, 255, 255, 0.4);
         }
 
         /* 촬영 전 필터 및 10초 대기 패널 */
@@ -508,7 +529,8 @@
             <div class="camera-overlay">
                 <div class="status-bar">
                     <span id="shot-counter">0 / 4</span>
-                    <span id="shot-message">필터를 고르고 촬영을 기다리세요!</span>
+                    <!-- 촬영 메시지 삭제, 카메라 전환 버튼 추가 -->
+                    <button id="switch-camera-btn" class="switch-camera-btn" onclick="app.switchCamera()" style="display: none;">🔄 카메라 전환</button>
                 </div>
             </div>
 
@@ -561,21 +583,22 @@
             currentFilter: 'none',
             currentShotIndex: 1, // 현재 몇 번째 사진인지 추적
             countdownValue: 10,
-            timerInterval: null
+            timerInterval: null,
+            facingMode: 'user' // 카메라 방향 상태 추가 (기본: 전면)
         },
         elements: {
             video: document.getElementById('video'),
             timer: document.getElementById('timer'),
             flash: document.getElementById('flash'),
             counter: document.getElementById('shot-counter'),
-            message: document.getElementById('shot-message'),
             finalPreview: document.getElementById('final-preview'),
             shareBtn: document.getElementById('share-btn'),
             statusText: document.getElementById('status-text'),
             qrcodeContainer: document.getElementById('qrcode'),
             decoImage: document.getElementById('deco-image'),
             preShotPanel: document.getElementById('pre-shot-panel'),
-            countdown10s: document.getElementById('countdown-10s')
+            countdown10s: document.getElementById('countdown-10s'),
+            switchCameraBtn: document.getElementById('switch-camera-btn') // 카메라 전환 버튼 요소 추가
         },
 
         showScreen(screenId) {
@@ -620,14 +643,39 @@
             }
         },
 
-        async initCamera() {
+        // isSwitching: 카메라 전환을 위한 재실행인지 여부
+        async initCamera(isSwitching = false) {
             try {
+                // 기존 스트림이 켜져있다면 정지
+                if (this.state.stream) {
+                    this.stopCamera();
+                }
+
+                // 디바이스 비디오 입력 장치(카메라) 개수 확인
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoInputs = devices.filter(device => device.kind === 'videoinput');
+                
+                // 카메라가 2개 이상이면 전환 버튼 표시, 아니면 숨김
+                if (videoInputs.length > 1) {
+                    this.elements.switchCameraBtn.style.display = 'block';
+                } else {
+                    this.elements.switchCameraBtn.style.display = 'none';
+                }
+
                 this.state.stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+                    video: { facingMode: this.state.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
                     audio: false
                 });
                 
                 this.elements.video.srcObject = this.state.stream;
+
+                // 전면 카메라(user)일 때만 거울 모드 적용, 후면일 때는 정상 출력
+                if (this.state.facingMode === 'user') {
+                    this.elements.video.style.transform = 'scaleX(-1)';
+                } else {
+                    this.elements.video.style.transform = 'scaleX(1)';
+                }
+
                 this.elements.video.onloadedmetadata = () => {
                     this.showScreen('camera-screen');
                     this.updateOrientation(); 
@@ -638,10 +686,12 @@
                         }
                     });
 
-                    // 촬영 데이터 초기화 및 첫 번째 컷을 위한 대기열 시작
-                    this.state.photos = [];
-                    this.state.currentShotIndex = 1;
-                    this.startPreShotTimer();
+                    // 카메라 전환이 아닌 최초 진입 시에만 데이터 초기화 및 대기 타이머 시작
+                    if (!isSwitching) {
+                        this.state.photos = [];
+                        this.state.currentShotIndex = 1;
+                        this.startPreShotTimer();
+                    }
                 };
             } catch (err) {
                 console.error("Camera Load error:", err);
@@ -650,12 +700,24 @@
             }
         },
 
+        // 전면/후면 카메라 전환 기능
+        async switchCamera() {
+            this.elements.switchCameraBtn.disabled = true; // 전환 중 중복 클릭 방지
+            
+            // 전면/후면 상태 토글
+            this.state.facingMode = this.state.facingMode === 'user' ? 'environment' : 'user';
+            
+            // 기존 촬영 진행 상태를 유지한 채 카메라만 재시작
+            await this.initCamera(true);
+            
+            this.elements.switchCameraBtn.disabled = false;
+        },
+
         // 매 사진 촬영 전 10초 대기 및 필터 고르는 화면
         startPreShotTimer() {
             this.elements.counter.innerText = `${this.state.currentShotIndex} / 4`;
             this.state.countdownValue = 10;
             this.elements.preShotPanel.style.display = 'flex';
-            this.elements.message.innerText = "필터를 고르고 촬영을 준비하세요!";
             this.elements.countdown10s.innerText = `${this.state.countdownValue}초 후 촬영 시작!`;
 
             if (this.state.timerInterval) clearInterval(this.state.timerInterval);
@@ -682,8 +744,6 @@
 
         // 사진 1장을 찍고 다음 절차로 넘기는 함수 (매 컷 반복 실행됨)
         async executeShot() {
-            this.elements.message.innerText = "예쁜 포즈를 취하세요! ✨";
-            
             // 3초 카운트다운
             for (let count = 3; count > 0; count--) {
                 this.elements.timer.innerText = count;
@@ -703,12 +763,10 @@
 
             // 다음 사진 촬영을 위한 대기 또는 완료 처리
             if (this.state.currentShotIndex < 4) {
-                this.elements.message.innerText = "다음 사진을 준비하세요!";
                 await this.sleep(1500); // 캡처 직후 약간의 인터벌
                 this.state.currentShotIndex++;
                 this.startPreShotTimer(); // 다음 컷을 위해 다시 필터/10초 대기 화면 표시
             } else {
-                this.elements.message.innerText = "수고하셨습니다! 🎈";
                 await this.sleep(1500);
                 
                 this.stopCamera();
@@ -723,8 +781,11 @@
             canvas.height = 480;
             const ctx = canvas.getContext('2d');
             
-            ctx.translate(canvas.width, 0);
-            ctx.scale(-1, 1);
+            // 전면 카메라일 경우에만 캔버스에도 거울 모드(좌우 반전) 적용
+            if (this.state.facingMode === 'user') {
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+            }
             
             const video = this.elements.video;
             const guide = document.getElementById('guide-box');
