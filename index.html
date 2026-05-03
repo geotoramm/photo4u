@@ -651,7 +651,13 @@
                     this.stopCamera();
                 }
 
-                // 디바이스 비디오 입력 장치(카메라) 개수 확인
+                // 1. 카메라 권한을 먼저 요청하여 스트림을 가져옵니다. (모바일 브라우저 권한 문제 해결을 위해 순서 변경)
+                this.state.stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: this.state.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: false
+                });
+
+                // 2. 권한을 얻은 후 연결된 비디오 입력 장치 개수 확인
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const videoInputs = devices.filter(device => device.kind === 'videoinput');
                 
@@ -661,11 +667,6 @@
                 } else {
                     this.elements.switchCameraBtn.style.display = 'none';
                 }
-
-                this.state.stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: this.state.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
-                    audio: false
-                });
                 
                 this.elements.video.srcObject = this.state.stream;
 
